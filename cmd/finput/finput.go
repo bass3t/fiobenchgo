@@ -58,9 +58,9 @@ func benchFile(path string) (readed int64, spend time.Duration) {
 	startTime := time.Now()
 
 	var wg sync.WaitGroup
-	wg.Add(params.SecReaders)
+	wg.Add(params.SecWorkers)
 
-	for i := 0; i < params.SecReaders; i++ {
+	for i := 0; i < params.SecWorkers; i++ {
 		go func() {
 			defer wg.Done()
 			atomic.AddInt64(&readed, readSections(path, sections))
@@ -88,7 +88,7 @@ func benchRead(path string) {
 				if secSize.Size >= blockSize.Size {
 					params = fio.BenchParams{
 						SecSize:    secSize.Size,
-						SecReaders: readers,
+						SecWorkers: readers,
 						BlockSize:  blockSize.Size}
 
 					readed, spend := benchFile(path)

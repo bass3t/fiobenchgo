@@ -9,7 +9,7 @@ type SectionInfo struct {
 // BenchParams define basic parameters for execution
 type BenchParams struct {
 	SecSize    int64
-	SecReaders int
+	SecWorkers int
 
 	BlockSize int64
 }
