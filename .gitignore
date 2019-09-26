@@ -6,6 +6,7 @@
 *.dylib
 
 cmd/finput/finput
+cmd/foutput/foutput
 
 # Test binary, build with `go test -c`
 *.test
