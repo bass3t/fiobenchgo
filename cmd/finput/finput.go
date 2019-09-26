@@ -1,104 +1,38 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"os"
-	"sync"
-	"sync/atomic"
-	"time"
+	"os/signal"
 
 	fio "github.com/bass3t/fiobenchgo/internal"
+	bench "github.com/bass3t/fiobenchgo/internal/bench"
 	fiofs "github.com/bass3t/fiobenchgo/internal/filesystem"
 )
 
-var params fio.BenchParams
-
-func readSection(r io.ReaderAt, section fio.SectionInfo) (readed int64) {
-	blkSize := fio.MinInt64(params.SecSize, params.BlockSize)
-	blk := make([]byte, blkSize)
-
-	var err error
-	for readed < section.Size && err == nil {
-		curOff := section.Offset + readed
-
-		// read one block
-		var sz int64
-		for sz < blkSize && err == nil {
-			var n int
-			n, err = r.ReadAt(blk[n:], curOff+sz)
-			sz += int64(n)
-		}
-
-		readed += int64(sz)
-	}
-
-	return
-}
-
-func readSections(r io.ReaderAt, input <-chan fio.SectionInfo) (readed int64) {
-	for section := range input {
-		readed += readSection(r, section)
-	}
-	return
-}
-
-func benchFile(path string) (readed int64, spend time.Duration) {
-	f, err := os.Open(path)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
-	size := fiofs.FileSize(path)
-
-	fiofs.DropCaches()
-
-	sections := fio.SplitToSections(size, params.SecSize)
-
-	startTime := time.Now()
-
-	var wg sync.WaitGroup
-	wg.Add(params.SecWorkers)
-
-	for i := 0; i < params.SecWorkers; i++ {
-		go func() {
-			defer wg.Done()
-			atomic.AddInt64(&readed, readSections(f, sections))
-		}()
-	}
-
-	wg.Wait()
-
-	endTime := time.Now()
-	spend = endTime.Sub(startTime)
-	return
-}
-
-func benchRead(path string) {
-	if !fiofs.IsFileExist(path) {
-		panic("file not found: " + path)
-	}
-
-	size := fiofs.FileSize(path)
-	fmt.Printf("Input size: %d\n", size)
-
+func benchRead(ctx context.Context, rb *bench.Reader) {
 	for readers := 1; readers <= 8; readers++ {
 		for _, secSize := range fio.BenchSectionSizes {
 			for _, blockSize := range fio.BenchBlockSizes {
 				if secSize.Size >= blockSize.Size {
-					params = fio.BenchParams{
+					params := fio.BenchParams{
 						SecSize:    secSize.Size,
 						SecWorkers: readers,
 						BlockSize:  blockSize.Size}
 
-					readed, spend := benchFile(path)
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						readed, spend, err := rb.Start(ctx, params)
 
-					if readed != size {
-						panic("failed read of file")
+						if err != nil {
+							panic("failed read of file")
+						}
+
+						fmt.Printf("Readers: %d Section: %s Block: %s Speed: %s\n", readers, secSize.Info, blockSize.Info, fio.PrintSpeed(readed, spend))
 					}
-
-					fmt.Printf("Readers: %d Section: %s Block: %s Speed: %s\n", readers, secSize.Info, blockSize.Info, fio.PrintSpeed(readed, spend))
 				}
 			}
 		}
@@ -106,5 +40,27 @@ func benchRead(path string) {
 }
 
 func main() {
-	benchRead(os.Args[1])
+	path := os.Args[1]
+	if !fiofs.IsFileExist(path) {
+		panic("file not found: " + path)
+	}
+
+	size := fiofs.FileSize(path)
+	fmt.Printf("Input size: %d\n", size)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	signalChan := make(chan os.Signal, 1)
+	done := make(chan bool)
+	signal.Notify(signalChan, os.Interrupt)
+
+	go func() {
+		<-signalChan
+		cancel()
+		done <- true
+	}()
+
+	benchRead(ctx, bench.NewReader(path, size))
+
+	<-done
 }
