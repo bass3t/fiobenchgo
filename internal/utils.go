@@ -12,7 +12,7 @@ func SplitToSections(totalSize, sectionSize int64) <-chan SectionInfo {
 	go func() {
 		defer close(out)
 		for offset := int64(0); offset < totalSize; offset += sectionSize {
-			out <- SectionInfo{Offset: offset, Size: sectionSize}
+			out <- SectionInfo{Offset: offset, Size: MinInt64(totalSize-offset, sectionSize)}
 		}
 	}()
 
@@ -21,8 +21,8 @@ func SplitToSections(totalSize, sectionSize int64) <-chan SectionInfo {
 
 // PrintSpeed output infrmation processing read/write speed
 func PrintSpeed(count int64, d time.Duration) (str string) {
-	count = count * 1000
-	speed := float64(count) / float64(d.Milliseconds())
+	count = count * 1000000
+	speed := float64(count) / float64(d.Microseconds())
 	speedMB := int(speed / (1024 * 1024))
 
 	if speedMB > 0 {
