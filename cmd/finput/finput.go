@@ -14,41 +14,42 @@ import (
 
 var params fio.BenchParams
 
-func readSection(fname string, section fio.SectionInfo) (readed int64) {
-	f, err := os.Open(fname)
-	if err != nil {
-		panic(err)
-	}
-
-	defer f.Close()
-	f.Seek(section.Offset, io.SeekStart)
-
+func readSection(r io.ReaderAt, section fio.SectionInfo) (readed int64) {
 	blkSize := fio.MinInt64(params.SecSize, params.BlockSize)
 	blk := make([]byte, blkSize)
 
-	for readed < section.Size {
-		sz, err := io.ReadFull(f, blk)
-		readed += int64(sz)
+	var err error
+	for readed < section.Size && err == nil {
+		curOff := section.Offset + readed
 
-		if err != nil {
-			break
+		// read one block
+		var sz int64
+		for sz < blkSize && err == nil {
+			var n int
+			n, err = r.ReadAt(blk[n:], curOff+sz)
+			sz += int64(n)
 		}
+
+		readed += int64(sz)
 	}
 
-	return readed
+	return
 }
 
-func readSections(fname string, input <-chan fio.SectionInfo) (readed int64) {
+func readSections(r io.ReaderAt, input <-chan fio.SectionInfo) (readed int64) {
 	for section := range input {
-		readed += readSection(fname, section)
+		readed += readSection(r, section)
 	}
 	return
 }
 
 func benchFile(path string) (readed int64, spend time.Duration) {
-	if !fiofs.IsFileExist(path) {
-		panic("file not found: " + path)
+	f, err := os.Open(path)
+	if err != nil {
+		panic(err)
 	}
+	defer f.Close()
+
 	size := fiofs.FileSize(path)
 
 	fiofs.DropCaches()
@@ -63,7 +64,7 @@ func benchFile(path string) (readed int64, spend time.Duration) {
 	for i := 0; i < params.SecWorkers; i++ {
 		go func() {
 			defer wg.Done()
-			atomic.AddInt64(&readed, readSections(path, sections))
+			atomic.AddInt64(&readed, readSections(f, sections))
 		}()
 	}
 
